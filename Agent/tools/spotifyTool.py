@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class SpotifyTool:
     def __init__(self):
         self.client_id = os.getenv('SPOTIFY_CLIENT_ID')
@@ -32,17 +33,6 @@ class SpotifyTool:
             return same_song and same_artist
 
         return same_song
-
-    def parse_song_and_artist(self, raw_song):
-        clean_text = raw_song.strip()
-        match = re.match(r"^(?:cancion\s+|canci[oó]n\s+)?(.+?)\s+de\s+(.+)$", clean_text, re.IGNORECASE)
-
-        if match:
-            song_name = match.group(1).strip()
-            artist_name = match.group(2).strip()
-            return song_name, artist_name
-
-        return clean_text, ""
 
     def buscar_cancion(self, song_name, artist_name=""):
         queries = []
@@ -83,11 +73,12 @@ class SpotifyTool:
         )
         self.sp = spotipy.Spotify(auth_manager=auth_manager)
 
-    def reproducir_cancion(self, song):
+    def reproducir_cancion(self, song, artist=""):
         if self.flag != 0:
             return "No se pudo reproducir la cancion."
 
-        song_name, artist_name = self.parse_song_and_artist(song)
+        song_name = song.strip()
+        artist_name = artist.strip()
         self.song = song_name.upper()
         self.author = artist_name.upper() if artist_name else ""
 
@@ -125,3 +116,4 @@ class SpotifyTool:
         print(f"Reproduciendo en: {device_name}")
         self.sp.start_playback(device_id=device_id, uris=[track_uri])
         return f"Reproduciendo {track_name} de {found_artist} en {device_name}"
+    

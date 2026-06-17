@@ -33,11 +33,18 @@ def main():
         }
     }
 
-    print("Nanito: En que puedo ayudarte hoy?")
-    voice.talk("En que puedo ayudarte hoy?")
+    print("Nanito: Hola! ¿En qué puedo ayudarte hoy?")
+    voice.talk("Hola, soy Nanito! ¿En qué puedo ayudarte hoy?")
+
+    primeraVez = True
+    palabras_despedida = ["adios", "hasta luego", "chao", "nos vemos", "a dios"]
 
     while True:
-        voice.talk("Te escucho.")
+        
+        if primeraVez:
+            voice.talk("Te escucho.")
+            primeraVez = False
+            
         user_input = voice.listen()
         if user_input:
             print(f"Usuario: {user_input}")
@@ -47,10 +54,11 @@ def main():
             voice.talk("No escuche nada.")
             continue
 
-        if user_input.lower() in ["salir", "exit", "quit", "adios", "hasta luego"]:
-            print("Nanito: Hasta luego!")
-            voice.talk("Hasta luego")
-            break
+        for palabra in palabras_despedida:
+            if palabra in user_input.lower():
+                print("Nanito: ¡Hasta luego!")
+                voice.talk("¡Hasta luego!")
+                return
 
         result = graph.invoke(
             {
