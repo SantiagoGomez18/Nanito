@@ -1,3 +1,4 @@
+import time
 from langchain_core.messages import HumanMessage
 from agent import build_agent
 from tools.voiceTool import VoiceTool
@@ -33,31 +34,49 @@ def main():
         }
     }
 
-    primeraVez = True
-    palabras_despedida = ["adios", "hasta luego", "chao", "nos vemos", "a dios", "adiós"]
+    palabras_despedida = ["adios", "hasta luego", "chao", "nos vemos", "a dios"]
+    palabra_despierta = "nanito"
+    tiempo_activo = 40
+    modo_activo = False
+    ultimo_comando = 0.0
 
-    print("Hola, soy Nanito! ¿En qué puedo ayudarte hoy?")
-    voice.talk("Hola, soy Nanito! ¿En qué puedo ayudarte hoy?")
+    print("Nanito: Hola! En que puedo ayudarte hoy?")
+    voice.talk("Hola, soy Nanito. Estoy listo.")
 
     while True:
-        
-        if primeraVez:
-            voice.talk("Te escucho.")
-            primeraVez = False
-            
-        user_input = voice.listen()
-        if user_input:
-            print(f"Usuario: {user_input}")
+        if not modo_activo:
+            wake_input = voice.listen(show_status=False, show_errors=False)
 
-        if not user_input:
-            print("Nanito: No escuche nada.")
-            voice.talk("No escuche nada.")
-            continue
+            if not wake_input or palabra_despierta not in wake_input.lower():
+                continue
+
+            user_input = wake_input.replace(palabra_despierta, "", 1).strip(" ,.")
+            modo_activo = True
+            ultimo_comando = time.time()
+
+            if not user_input:
+                voice.talk("Te escucho.")
+                user_input = voice.listen(show_status=True, show_errors=False)
+                if not user_input:
+                    modo_activo = False
+                    continue
+        else:
+            if time.time() - ultimo_comando > tiempo_activo:
+                modo_activo = False
+                continue
+
+            user_input = voice.listen(show_status=True, show_errors=False)
+            if not user_input:
+                if time.time() - ultimo_comando > tiempo_activo:
+                    modo_activo = False
+                continue
+
+        print(f"Usuario: {user_input}")
 
         for palabra in palabras_despedida:
             if palabra in user_input.lower():
-                print("Nanito: ¡Hasta luego!")
-                voice.talk("¡Hasta luego!")
+                print("Nanito: Hasta luego!")
+                voice.talk("Hasta luego")
                 return
 
         result = graph.invoke(
@@ -69,6 +88,7 @@ def main():
             config=config
         )
 
+        ultimo_comando = time.time()
         response = extract_response_text(result["messages"][-1].content)
         print("Nanito:", response)
         if response:

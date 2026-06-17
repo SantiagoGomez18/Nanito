@@ -28,3 +28,5 @@ TestResults.xml
 #pycache
 /agent/tools/__pycache__/
 /agent/__pycache__/
+#audio
+/audio/alarm.mp3

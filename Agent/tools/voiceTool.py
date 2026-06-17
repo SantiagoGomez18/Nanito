@@ -57,10 +57,12 @@ class VoiceTool:
                 except OSError:
                     pass
 
-    def listen(self):
+    def listen(self, show_status=True, show_errors=True):
         try:
             with sr.Microphone(device_index=self.device_index) as source:
-                print("Escuchando...")
+                if show_status:                    
+                    print("Escuchando...")
+                    
                 self.listener.adjust_for_ambient_noise(source, duration=1)
                 pc = self.listener.listen(
                     source,
@@ -68,14 +70,19 @@ class VoiceTool:
                     phrase_time_limit=self.phrase_time_limit
                 )
                 rec = self.listener.recognize_google(pc, language='es-ES')
-                print(f"Comando reconocido: {rec}")
+                if show_status:
+                    print(f"Comando reconocido: {rec}")
                 return rec.lower()
         except sr.WaitTimeoutError:
-            print(f"No se detecto voz en {self.timeout} segundos.")
+            if show_errors:
+                print(f"No se detecto voz en {self.timeout} segundos.")
         except sr.UnknownValueError:
-            print("No se entendio el audio.")
+            if show_errors:
+                print("No se entendio el audio.")
         except sr.RequestError as e:
-            print(f"Error del servicio de reconocimiento: {e}")
+            if show_errors:
+                print(f"Error del servicio de reconocimiento: {e}")
         except Exception as e:
-            print(f"Error al reconocer el comando: {e}")
+            if show_errors:
+                print(f"Error al reconocer el comando: {e}")
         return ""
