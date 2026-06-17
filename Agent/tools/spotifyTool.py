@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 class SpotifyTool:
     def __init__(self):
         self.client_id = os.getenv('SPOTIFY_CLIENT_ID')
@@ -117,3 +116,5 @@ class SpotifyTool:
         self.sp.start_playback(device_id=device_id, uris=[track_uri])
         return f"Reproduciendo {track_name} de {found_artist} en {device_name}"
     
+    def frenar_cancion(self):
+        self.sp.pause_playback()

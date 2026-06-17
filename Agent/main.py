@@ -33,11 +33,11 @@ def main():
         }
     }
 
-    print("Nanito: Hola! ¿En qué puedo ayudarte hoy?")
-    voice.talk("Hola, soy Nanito! ¿En qué puedo ayudarte hoy?")
-
     primeraVez = True
-    palabras_despedida = ["adios", "hasta luego", "chao", "nos vemos", "a dios"]
+    palabras_despedida = ["adios", "hasta luego", "chao", "nos vemos", "a dios", "adiós"]
+
+    print("Hola, soy Nanito! ¿En qué puedo ayudarte hoy?")
+    voice.talk("Hola, soy Nanito! ¿En qué puedo ayudarte hoy?")
 
     while True:
         

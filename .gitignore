@@ -23,3 +23,8 @@ rad.json
 TestResults.xml
 #Envs
 .env
+#spotify
+.spotify_cache
+#pycache
+tools/__pycache__/
+/agent/__pycache__/

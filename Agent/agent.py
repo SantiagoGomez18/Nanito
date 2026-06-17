@@ -10,7 +10,9 @@ from langgraph.graph import StateGraph, START
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import SystemMessage
 import tools.spotifyTool as sp
+import tools.alarmTool as al
 from langgraph.checkpoint.memory import MemorySaver
+import threading
 
 
 class MessagesState(TypedDict):
@@ -35,30 +37,51 @@ Para Spotify:
 - Si la herramienta devuelve una coincidencia aproximada, dilo tal cual.
 - Solo di que se esta reproduciendo si la herramienta lo confirmo."""
 
-
 load_dotenv()
-
 
 def _set_env(var: str):
     if not os.environ.get(var):
         os.environ[var] = getpass.getpass(f"{var}: ")
 
-
 _set_env("OPENAI_API_KEY")
 
+# Crea las instancias de las herramientas una vez para evitar problemas de inicialización múltiple
+spotifyTool = sp.SpotifyTool()
+alarmTool = al.AlarmTool()
+
+# tools
+@tool
+def spotify_poner_cancion(song: str, artist: str = "") -> str:
+    """Reproduce en Spotify la cancion indicada por el usuario. Si conoces el artista, envialo por separado."""
+    spotifyTool.authenticate()
+    return spotifyTool.reproducir_cancion(song, artist)
 
 @tool
-def spotify(song: str, artist: str = "") -> str:
-    """Reproduce en Spotify la cancion indicada por el usuario. Si conoces el artista, envialo por separado."""
-    spotify_tool = sp.SpotifyTool()
-    spotify_tool.authenticate()
-    return spotify_tool.reproducir_cancion(song, artist)
+def spotify_frenar_cancion() -> str:
+    """Detiene la cancion que se esta reproduciendo en Spotify."""
+    spotifyTool.authenticate()
+    spotifyTool.frenar_cancion()
+    return "Cancion detenida."
 
+@tool
+def poner_alarma(seconds: int = 0, minutes: int = 0, hour: int = 0) -> str:
+    """Configura una alarma que sonara despues del tiempo indicado."""
+    alarmTool.start_alarm(seconds, minutes, hour)
+    return "Alarma sonando."
+
+@tool
+def detener_alarma() -> str:
+    """Detiene la alarma si esta sonando."""
+    alarmTool.stop_alarm()
+    return "Alarma detenida."
 
 tools = [
-    spotify
+    spotify_poner_cancion,
+    poner_alarma,
+    detener_alarma,
 ]
 
+# Configuracion del agente
 llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0)
 llm_tool = llm.bind_tools(tools)
 sys_msg = SystemMessage(content=SYSTEM_PROMPT)
@@ -67,7 +90,7 @@ sys_msg = SystemMessage(content=SYSTEM_PROMPT)
 def assistant(state: MessagesState):
     return {"messages": [llm_tool.invoke([sys_msg] + state["messages"])]}
 
-
+# Construccion del grafo
 def build_agent():
     builder = StateGraph(MessagesState)
     builder.add_node("assistant", assistant)
