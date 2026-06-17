@@ -24,3 +24,7 @@ class AlarmTool:
         hilo = threading.Thread(target=self.set_alarm, args=(seconds, minutes, hour))
         hilo.start()
 
+    def snooze_alarm(self, seconds, minutes=0, hour=0):
+        self.stop_alarm()
+        time.sleep(seconds + (minutes * 60) + (hour * 3600))
+        self.tocar_alarma()
