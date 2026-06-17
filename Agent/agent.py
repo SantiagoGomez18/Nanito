@@ -77,6 +77,7 @@ def detener_alarma() -> str:
 
 tools = [
     spotify_poner_cancion,
+    spotify_frenar_cancion,
     poner_alarma,
     detener_alarma,
 ]

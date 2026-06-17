@@ -26,5 +26,5 @@ TestResults.xml
 #spotify
 .spotify_cache
 #pycache
-tools/__pycache__/
+/tools/__pycache__/
 /agent/__pycache__/
