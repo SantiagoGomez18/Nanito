@@ -1,0 +1,9 @@
+edge-tts
+langchain-core
+langchain-openai
+langgraph
+pygame
+PyAudio
+python-dotenv
+SpeechRecognition
+spotipy
