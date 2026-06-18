@@ -75,9 +75,8 @@ def main():
 
         for palabra in palabras_despedida:
             if palabra in user_input.lower():
-                print("Nanito: Hasta luego!")
-                voice.talk("Hasta luego")
-                return
+                modo_activo = False
+                continue
 
         result = graph.invoke(
             {

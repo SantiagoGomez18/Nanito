@@ -29,6 +29,9 @@ Reglas:
 - No inventes resultados ni digas que algo se completo si la herramienta no lo confirmo.
 - Responde breve, natural y sin markdown.
 - No uses ** ni formato decorativo, porque la voz lo lee literal.
+- Para alarmas:
+- Usa poner_alarma para duraciones relativas como "en 10 minutos".
+- Usa poner_alarma_hora para horas exactas como "a las 6:55".
 
 Para Spotify:
 - Si el usuario menciona cancion y artista, llama la herramienta spotify separando song y artist.
@@ -66,8 +69,18 @@ def spotify_frenar_cancion() -> str:
 @tool
 def poner_alarma(seconds: int = 0, minutes: int = 0, hour: int = 0) -> str:
     """Configura una alarma que sonara despues del tiempo indicado."""
-    alarmTool.start_alarm(seconds, minutes, hour)
-    return "Alarma sonando."
+    creada = alarmTool.start_alarm(seconds, minutes, hour)
+    if not creada:
+        return "No pude configurar la alarma porque el tiempo indicado no es valido."
+    return "Alarma configurada."
+
+@tool
+def poner_alarma_hora(hour: int, minutes: int = 0, period: str = "") -> str:
+    """Configura una alarma para una hora exacta. period puede ser am, pm o vacio."""
+    creada = alarmTool.alarm_at(hour, minutes, period)
+    if not creada:
+        return "No pude configurar la alarma para esa hora."
+    return "Alarma configurada."
 
 @tool
 def detener_alarma() -> str:
@@ -75,11 +88,20 @@ def detener_alarma() -> str:
     alarmTool.stop_alarm()
     return "Alarma detenida."
 
+@tool
+def snooze_alarma(minutes: int) -> str:
+    """Pospone la alarma por el tiempo indicado."""
+    alarmTool.stop_alarm()
+    alarmTool.start_alarm(minutes=minutes)
+    return f"Alarma pospuesta por {minutes} minutos."
+
 tools = [
     spotify_poner_cancion,
     spotify_frenar_cancion,
     poner_alarma,
+    poner_alarma_hora,
     detener_alarma,
+    snooze_alarma
 ]
 
 # Configuracion del agente

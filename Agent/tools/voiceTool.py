@@ -23,7 +23,7 @@ class VoiceTool:
         if not pygame.mixer.get_init():
             pygame.mixer.init()
 
-    async def _synthesize_to_file(self, text, output_path):
+    async def texto_a_audio(self, text, output_path):
         communicate = edge_tts.Communicate(text=text, voice=self.voice_name, rate=self.voice_rate)
         await communicate.save(output_path)
 
@@ -36,7 +36,7 @@ class VoiceTool:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_file:
                 temp_path = temp_file.name
 
-            asyncio.run(self._synthesize_to_file(text, temp_path))
+            asyncio.run(self.texto_a_audio(text, temp_path))
 
             pygame.mixer.music.load(temp_path)
             pygame.mixer.music.play()
