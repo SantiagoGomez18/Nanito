@@ -67,7 +67,7 @@ class SpotifyTool:
             client_secret=self.client_secret,
             redirect_uri=self.redirect_uri,
             scope=self.scope,
-            open_browser=True,
+            open_browser=False,
             cache_path=".spotify_cache"
         )
         self.sp = spotipy.Spotify(auth_manager=auth_manager)

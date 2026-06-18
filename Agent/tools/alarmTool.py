@@ -1,7 +1,11 @@
+import os
 import time
 import pygame
 import threading
 from datetime import datetime, timedelta
+
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ALARM_PATH = os.path.join(_BASE_DIR, "audio", "alarm.mp3")
 
 class AlarmTool:
 
@@ -19,7 +23,7 @@ class AlarmTool:
         
     def tocar_alarma(self):
         pygame.mixer.init()
-        pygame.mixer.music.load("audio/alarm.mp3")
+        pygame.mixer.music.load(_ALARM_PATH)
         # Reproducir en bucle
         pygame.mixer.music.play(-1)
         # Ajustar el volumen 
