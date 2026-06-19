@@ -120,7 +120,7 @@ class SpotifyTool:
 
         return f"Reproduciendo {track_name} de {found_artist} en {device_name}"
 
-    def _encolar_recomendaciones(self, track_id, artist_name, device_id, cantidad=10):
+    def _encolar_recomendaciones(self, track_id, artist_name, device_id, cantidad=25):
         candidatos = self._buscar_candidatos(artist_name, track_id)
 
         if not candidatos:
