@@ -17,7 +17,7 @@ class SpotifyTool:
         self.author = ""
         self.flag = 0
         self.sp = None
-        self.scope = "user-modify-playback-state user-read-playback-state"
+        self.scope = "user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative user-library-read"
 
     def normalizar_texto(self, text):
         text = text.lower().strip()
@@ -162,5 +162,114 @@ class SpotifyTool:
         print(f"Candidatos encontrados: {len(candidatos)}")
         return candidatos
     
+    def _es_me_gusta(self, nombre):
+        n = self.normalizar_texto(nombre)
+        claves = ["tus me gusta", "me gusta", "mis likes", "mis me gusta", "likes", "favoritos", "canciones que me gustan"]
+        return any(clave in n for clave in claves)
+
+    def reproducir_me_gusta(self, aleatorio=False):
+        # Las canciones con "me gusta" no tienen URI de playlist, se reproducen por lista de tracks.
+        uris = []
+        offset = 0
+        while len(uris) < 50:
+            try:
+                resultado = self.sp.current_user_saved_tracks(limit=5, offset=offset)
+            except Exception as e:
+                print(f"Fallo al leer canciones guardadas: {e}")
+                break
+            items = resultado.get("items", [])
+            if not items:
+                break
+            for item in items:
+                track = item.get("track")
+                if track:
+                    uris.append(track["uri"])
+            if len(items) < 5:
+                break
+            offset += 5
+
+        if not uris:
+            return "No tienes canciones guardadas en me gusta."
+
+        if aleatorio:
+            random.shuffle(uris)
+
+        devices = self.sp.devices().get("devices", [])
+        if not devices:
+            return "No encontre dispositivos activos de Spotify. Abre Spotify y vuelve a intentarlo."
+
+        active_device = next((d for d in devices if d.get("is_active")), None)
+        selected_device = active_device if active_device else devices[0]
+        device_id = selected_device["id"]
+        device_name = selected_device["name"]
+
+        self.sp.start_playback(device_id=device_id, uris=uris)
+        modo = " en modo aleatorio" if aleatorio else ""
+        return f"Reproduciendo tus canciones que te gustan{modo} en {device_name}"
+
+    def reproducir_playlist(self, nombre, aleatorio=False):
+        if self._es_me_gusta(nombre):
+            return self.reproducir_me_gusta(aleatorio)
+
+        playlist = self._buscar_playlist(nombre)
+        if not playlist:
+            return f"No encontre una playlist llamada {nombre}."
+
+        devices = self.sp.devices().get("devices", [])
+        if not devices:
+            return "No encontre dispositivos activos de Spotify. Abre Spotify y vuelve a intentarlo."
+
+        active_device = next((d for d in devices if d.get("is_active")), None)
+        selected_device = active_device if active_device else devices[0]
+        device_id = selected_device["id"]
+        device_name = selected_device["name"]
+
+        try:
+            self.sp.shuffle(aleatorio, device_id=device_id)
+        except Exception as e:
+            print(f"No se pudo cambiar el modo aleatorio: {e}")
+
+        self.sp.start_playback(device_id=device_id, context_uri=playlist["uri"])
+        modo = " en modo aleatorio" if aleatorio else ""
+        return f"Reproduciendo la playlist {playlist['name']}{modo} en {device_name}"
+
+    def _buscar_playlist(self, nombre):
+        objetivo = self.normalizar_texto(nombre)
+        mejor_parcial = None
+        offset = 0
+        while True:
+            try:
+                resultado = self.sp.current_user_playlists(limit=5, offset=offset)
+            except Exception as e:
+                print(f"Fallo al listar playlists: {e}")
+                break
+
+            items = resultado.get("items", [])
+            if not items:
+                break
+
+            for pl in items:
+                if not pl:
+                    continue
+                nombre_pl = self.normalizar_texto(pl["name"])
+                if nombre_pl == objetivo:
+                    return pl
+                if mejor_parcial is None and (objetivo in nombre_pl or nombre_pl in objetivo):
+                    mejor_parcial = pl
+
+            if len(items) < 5:
+                break
+            offset += 5
+
+        return mejor_parcial
+
     def frenar_cancion(self):
         self.sp.pause_playback()
+
+    def continuar_cancion(self):
+        try:
+            self.sp.start_playback()
+            return "Reproduccion reanudada."
+        except Exception as e:
+            print(f"No se pudo reanudar: {e}")
+            return "No hay nada que reanudar."
