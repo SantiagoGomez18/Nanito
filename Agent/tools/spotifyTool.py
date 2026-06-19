@@ -1,6 +1,7 @@
 from spotipy.oauth2 import SpotifyOAuth
 import spotipy
 import os
+import random
 import re
 import unicodedata
 from dotenv import load_dotenv
@@ -99,7 +100,7 @@ class SpotifyTool:
 
         print(f"Encontrada: {track_name} - {found_artist}")
 
-        if not exact_match:
+        if not exact_match and not artist_name:
             return f'No encontre coincidencia exacta. La mas relevante fue "{track_name}" de {found_artist}.'
 
         devices = self.sp.devices().get("devices", [])
@@ -114,7 +115,52 @@ class SpotifyTool:
 
         print(f"Reproduciendo en: {device_name}")
         self.sp.start_playback(device_id=device_id, uris=[track_uri])
+
+        self._encolar_recomendaciones(track["id"], track["artists"][0]["name"], device_id)
+
         return f"Reproduciendo {track_name} de {found_artist} en {device_name}"
+
+    def _encolar_recomendaciones(self, track_id, artist_name, device_id, cantidad=10):
+        candidatos = self._buscar_candidatos(artist_name, track_id)
+
+        if not candidatos:
+            print("No se encontraron canciones para encolar.")
+            return
+
+        seleccionadas = random.sample(candidatos, min(cantidad, len(candidatos)))
+        encoladas = 0
+        for track in seleccionadas:
+            try:
+                self.sp.add_to_queue(track["uri"], device_id=device_id)
+                encoladas += 1
+            except Exception as e:
+                print(f"No se pudo encolar {track['name']}: {e}")
+        print(f"{encoladas} canciones agregadas a la cola.")
+
+    def _buscar_candidatos(self, artist_name, track_id):
+        # La app tiene cap de limit bajo: usamos limit=5 y paginamos con offset.
+        vistos = {track_id}
+        candidatos = []
+        for offset in range(0, 45, 5):
+            try:
+                resultado = self.sp.search(
+                    q=f'artist:"{artist_name}"', type="track", limit=5, offset=offset
+                )
+                items = resultado.get("tracks", {}).get("items", [])
+            except Exception as e:
+                print(f"Fallo busqueda (offset {offset}): {e}")
+                break
+
+            if not items:
+                break
+
+            for t in items:
+                if t["id"] not in vistos:
+                    vistos.add(t["id"])
+                    candidatos.append(t)
+
+        print(f"Candidatos encontrados: {len(candidatos)}")
+        return candidatos
     
     def frenar_cancion(self):
         self.sp.pause_playback()
