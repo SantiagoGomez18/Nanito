@@ -8,6 +8,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+MAX_COLA = 30  # limite maximo total de canciones en la cola
+CANCIONES_POR_PEDIDO = 15  # cuantas canciones nuevas se agregan al pedir una cancion
+
 class SpotifyTool:
     def __init__(self):
         self.client_id = os.getenv('SPOTIFY_CLIENT_ID')
@@ -17,6 +20,7 @@ class SpotifyTool:
         self.author = ""
         self.flag = 0
         self.sp = None
+        self.cola = []  # cola interna gestionada: lista de tracks (dicts de Spotify)
         self.scope = "user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative user-library-read"
 
     def normalizar_texto(self, text):
@@ -114,28 +118,101 @@ class SpotifyTool:
         device_name = selected_device["name"]
 
         print(f"Reproduciendo en: {device_name}")
-        self.sp.start_playback(device_id=device_id, uris=[track_uri])
-
-        self._encolar_recomendaciones(track["id"], track["artists"][0]["name"], device_id)
+        candidatos = self._buscar_candidatos(found_artist, track["id"])
+        self._reconstruir_cola(track, candidatos, device_id)
 
         return f"Reproduciendo {track_name} de {found_artist} en {device_name}"
 
-    def _encolar_recomendaciones(self, track_id, artist_name, device_id, cantidad=25):
-        candidatos = self._buscar_candidatos(artist_name, track_id)
+    def agregar_cancion(self, song, artist=""):
+        song_name = song.strip()
+        artist_name = artist.strip()
 
-        if not candidatos:
-            print("No se encontraron canciones para encolar.")
-            return
+        track, _, exact_match = self.buscar_cancion(song_name, artist_name)
+        if not track:
+            return "No encontre esa cancion en Spotify."
 
-        seleccionadas = random.sample(candidatos, min(cantidad, len(candidatos)))
-        encoladas = 0
-        for track in seleccionadas:
-            try:
-                self.sp.add_to_queue(track["uri"], device_id=device_id)
-                encoladas += 1
-            except Exception as e:
-                print(f"No se pudo encolar {track['name']}: {e}")
-        print(f"{encoladas} canciones agregadas a la cola.")
+        track_name = track["name"]
+        found_artist = track["artists"][0]["name"]
+
+        if not exact_match and not artist_name:
+            return f'No encontre coincidencia exacta. La mas relevante fue "{track_name}" de {found_artist}.'
+
+        if any(t["id"] == track["id"] for t in self.cola):
+            return f"{track_name} ya esta en la cola."
+
+        devices = self.sp.devices().get("devices", [])
+        if not devices:
+            return "No encontre dispositivos activos de Spotify. Abre Spotify y vuelve a intentarlo."
+
+        active_device = next((d for d in devices if d.get("is_active")), None)
+        selected_device = active_device if active_device else devices[0]
+        device_id = selected_device["id"]
+
+        # Leer la cancion y posicion actual para reanudarla casi sin corte.
+        current_uri = None
+        current_id = None
+        position_ms = 0
+        try:
+            current = self.sp.current_playback()
+            if current and current.get("item"):
+                current_uri = current["item"]["uri"]
+                current_id = current["item"]["id"]
+                position_ms = current.get("progress_ms", 0)
+        except Exception as e:
+            print(f"No se pudo leer la reproduccion actual: {e}")
+
+        # La nueva cancion va al frente de la cola gestionada (suena a continuacion).
+        cola_sin_actual = [t for t in self.cola if t["id"] != current_id]
+        self.cola = ([track] + cola_sin_actual)[:MAX_COLA]
+
+        try:
+            self.sp.shuffle(False, device_id=device_id)
+        except Exception as e:
+            print(f"No se pudo apagar el modo aleatorio: {e}")
+
+        try:
+            if current_uri:
+                uris = [current_uri] + [t["uri"] for t in self.cola]
+                self.sp.start_playback(device_id=device_id, uris=uris, position_ms=position_ms)
+            else:
+                uris = [t["uri"] for t in self.cola]
+                self.sp.start_playback(device_id=device_id, uris=uris)
+        except Exception as e:
+            print(f"No se pudo reconstruir la cola: {e}")
+            return "No pude agregar la cancion a la cola."
+
+        return f"{track_name} de {found_artist} sonara a continuacion."
+
+    def _reconstruir_cola(self, track_actual, candidatos, device_id):
+        # Mezcla los candidatos nuevos con la cola previa, sin duplicar
+        # canciones, mezcla todo y respeta el limite maximo.
+        random.shuffle(candidatos)
+        candidatos = candidatos[:CANCIONES_POR_PEDIDO]  # cuantas nuevas por pedido
+        combinados = self.cola + candidatos
+
+        ids_vistos = {track_actual["id"]}
+        cola_unica = []
+        for t in combinados:
+            if t["id"] in ids_vistos:
+                continue
+            ids_vistos.add(t["id"])
+            cola_unica.append(t)
+
+        random.shuffle(cola_unica)
+        self.cola = cola_unica[:MAX_COLA]
+
+        # Apagar shuffle para que la cancion pedida suene primero.
+        try:
+            self.sp.shuffle(False, device_id=device_id)
+        except Exception as e:
+            print(f"No se pudo apagar el modo aleatorio: {e}")
+
+        # Todo va por CONTEXTO (un solo start_playback con la lista completa),
+        # nunca add_to_queue. Asi "agregar" puede insertar al frente despues.
+        # Con shuffle apagado, la cancion pedida suena primero (uris[0]).
+        uris = [track_actual["uri"]] + [t["uri"] for t in self.cola]
+        self.sp.start_playback(device_id=device_id, uris=uris)
+        print(f"Cola: {len(self.cola)} canciones (max {MAX_COLA}).")
 
     def _buscar_candidatos(self, artist_name, track_id):
         # La app tiene cap de limit bajo: usamos limit=5 y paginamos con offset.
@@ -203,6 +280,7 @@ class SpotifyTool:
         device_id = selected_device["id"]
         device_name = selected_device["name"]
 
+        self.cola = []  # la cola gestionada se descarta al poner me gusta
         self.sp.start_playback(device_id=device_id, uris=uris)
         modo = " en modo aleatorio" if aleatorio else ""
         return f"Reproduciendo tus canciones que te gustan{modo} en {device_name}"
@@ -229,6 +307,7 @@ class SpotifyTool:
         except Exception as e:
             print(f"No se pudo cambiar el modo aleatorio: {e}")
 
+        self.cola = []  # la cola gestionada se descarta al poner una playlist
         self.sp.start_playback(device_id=device_id, context_uri=playlist["uri"])
         modo = " en modo aleatorio" if aleatorio else ""
         return f"Reproduciendo la playlist {playlist['name']}{modo} en {device_name}"

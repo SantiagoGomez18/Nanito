@@ -34,8 +34,9 @@ Reglas:
 - Usa poner_alarma_hora para horas exactas como "a las 6:55".
 
 Para Spotify:
-- Si el usuario menciona cancion y artista, llama la herramienta spotify separando song y artist.
-- Si solo menciona la cancion, usa song y deja artist vacio.
+- Si el usuario dice "pon", "reproduce" o "quiero escuchar" una cancion, usa spotify_poner_cancion (esto reinicia la reproduccion con esa cancion).
+- Si el usuario dice "agrega", "encola" o "pon despues" una cancion, usa spotify_agregar_cancion (esto la deja sonando despues de la actual sin interrumpir).
+- Si menciona cancion y artista, separa song y artist. Si solo menciona la cancion, usa song y deja artist vacio.
 - No inventes artista.
 - Si el usuario pide una playlist o lista, usa spotify_poner_playlist con el nombre.
 - Si pide modo aleatorio, shuffle o desordenado, pon aleatorio en True.
@@ -63,6 +64,12 @@ def spotify_poner_cancion(song: str, artist: str = "") -> str:
     """Reproduce en Spotify la cancion indicada por el usuario. Si conoces el artista, envialo por separado."""
     spotifyTool.authenticate()
     return spotifyTool.reproducir_cancion(song, artist)
+
+@tool
+def spotify_agregar_cancion(song: str, artist: str = "") -> str:
+    """Agrega una cancion a la cola de Spotify para que suene despues de la actual, sin interrumpir la que esta sonando. Si conoces el artista, envialo por separado."""
+    spotifyTool.authenticate()
+    return spotifyTool.agregar_cancion(song, artist)
 
 @tool
 def spotify_poner_playlist(nombre: str, aleatorio: bool = False) -> str:
@@ -114,6 +121,7 @@ def snooze_alarma(minutes: int) -> str:
 
 tools = [
     spotify_poner_cancion,
+    spotify_agregar_cancion,
     spotify_poner_playlist,
     spotify_frenar_cancion,
     spotify_continuar_cancion,
