@@ -7,9 +7,19 @@ import pygame
 import speech_recognition as sr
 
 
+def _find_input_device():
+    nombres = sr.Microphone.list_microphone_names()
+    for i, nombre in enumerate(nombres):
+        n = nombre.lower()
+        if any(k in n for k in ("usb", "respeaker", "jounivo", "microphone", "mic")):
+            return i
+    return None  # None deja que SpeechRecognition use el microfono por defecto
+
+
 class VoiceTool:
-    def __init__(self, device_index=3, timeout=10):
-        self.device_index = device_index
+    def __init__(self, device_index=None, timeout=10):
+        self.device_index = device_index if device_index is not None else _find_input_device()
+        print(f"Microfono seleccionado: index={self.device_index}")
         self.timeout = timeout
         self.listener = sr.Recognizer()
         self.listener.pause_threshold = 2.0
