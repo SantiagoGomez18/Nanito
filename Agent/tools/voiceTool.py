@@ -10,6 +10,82 @@ import time
 # Raspberry Pi, y el hijo no los necesita.
 
 
+def _resolve_input_device(requested):
+    # Busca un dispositivo de ENTRADA real en vez de confiar en el "default"
+    # de ALSA. En Raspberry Pi el mic USB existe pero no siempre esta
+    # configurado como default, y pedirlo con device_index=None falla con
+    # "No Default Input Device Available".
+    import pyaudio
+
+    pa = pyaudio.PyAudio()
+    try:
+        total = pa.get_device_count()
+
+        # Si nos pasaron un indice, lo usamos solo si es valido y es entrada.
+        if requested is not None and 0 <= requested < total:
+            info = pa.get_device_info_by_index(requested)
+            if info.get("maxInputChannels", 0) > 0:
+                return requested
+
+        entradas = []
+        for i in range(total):
+            try:
+                info = pa.get_device_info_by_index(i)
+            except Exception:
+                continue
+            if info.get("maxInputChannels", 0) > 0:
+                entradas.append((i, str(info.get("name", "")).lower()))
+
+        if not entradas:
+            return None
+
+        for i, nombre in entradas:
+            if any(k in nombre for k in ("jounivo", "usb", "respeaker", "mic")):
+                return i
+
+        return entradas[0][0]
+    finally:
+        pa.terminate()
+
+
+def _tasa_nativa(indice):
+    import pyaudio
+
+    pa = pyaudio.PyAudio()
+    try:
+        info = pa.get_device_info_by_index(indice)
+        return int(info.get("defaultSampleRate", 0)) or None
+    except Exception:
+        return None
+    finally:
+        pa.terminate()
+
+
+def _capturar_audio(sr, listener, indice, timeout, phrase_time_limit):
+    # SpeechRecognition abre a 16000 Hz por defecto. Micros USB baratos
+    # (como el JV610) a veces rechazan esa tasa con "Unable to install hw
+    # params", asi que si falla reintentamos con la tasa nativa del equipo.
+    tasas = [None]
+    nativa = _tasa_nativa(indice)
+    if nativa and nativa != 16000:
+        tasas.append(nativa)
+
+    ultimo_error = None
+    for tasa in tasas:
+        try:
+            mic = sr.Microphone(device_index=indice) if tasa is None \
+                else sr.Microphone(device_index=indice, sample_rate=tasa)
+            with mic as source:
+                listener.adjust_for_ambient_noise(source, duration=1)
+                return listener.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
+        except sr.WaitTimeoutError:
+            raise
+        except Exception as e:
+            ultimo_error = e
+
+    raise ultimo_error if ultimo_error else RuntimeError("No se pudo abrir el microfono.")
+
+
 def _listen_worker(device_index, timeout, phrase_time_limit, language, queue):
     # Corre en un PROCESO separado a proposito: si PortAudio/ALSA hace
     # segmentation fault al abrir el microfono, solo muere este proceso
@@ -17,16 +93,18 @@ def _listen_worker(device_index, timeout, phrase_time_limit, language, queue):
     import speech_recognition as sr
 
     try:
+        indice = _resolve_input_device(device_index)
+        if indice is None:
+            queue.put(("error", "No se encontro ningun dispositivo de entrada de audio."))
+            return
+
         listener = sr.Recognizer()
         listener.pause_threshold = 2.0
         listener.non_speaking_duration = 1.0
         listener.phrase_threshold = 0.2
         listener.dynamic_energy_threshold = True
 
-        with sr.Microphone(device_index=device_index) as source:
-            listener.adjust_for_ambient_noise(source, duration=1)
-            audio = listener.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
-
+        audio = _capturar_audio(sr, listener, indice, timeout, phrase_time_limit)
         rec = listener.recognize_google(audio, language=language)
         queue.put(("ok", rec.lower()))
     except sr.WaitTimeoutError:
