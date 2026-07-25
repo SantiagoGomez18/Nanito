@@ -31,7 +31,7 @@ def extract_response_text(content):
 def worker(graph, voice, face_queue):
     config = {"configurable": {"thread_id": "usuario_1"}}
     palabras_despedida = ["adios", "hasta luego", "chao", "nos vemos", "a dios", "adiós", "hasta pronto", "me voy", "me retiro", "me despido", "me desconecto"]
-    palabra_despierta = "nanito"
+    palabras_despierta = ["nanito", "manito", "panito", "nanit", "anito"]
     tiempo_activo = 30
     modo_activo = False
     ultimo_comando = 0.0
@@ -46,10 +46,13 @@ def worker(graph, voice, face_queue):
             face_queue.put("sleep")
             wake_input = voice.listen(show_status=True, show_errors=True)
 
-            if not wake_input or palabra_despierta not in wake_input.lower():
+            wake_input_lower = wake_input.lower() if wake_input else ""
+            palabra_encontrada = next((p for p in palabras_despierta if p in wake_input_lower), None)
+
+            if not palabra_encontrada:
                 continue
 
-            user_input = wake_input.replace(palabra_despierta, "", 1).strip(" ,.")
+            user_input = wake_input_lower.replace(palabra_encontrada, "", 1).strip(" ,.")
             modo_activo = True
             ultimo_comando = time.time()
 

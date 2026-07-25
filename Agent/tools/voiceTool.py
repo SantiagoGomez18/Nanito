@@ -75,7 +75,7 @@ class VoiceTool:
                     timeout=self.timeout,
                     phrase_time_limit=self.phrase_time_limit
                 )
-                rec = self.listener.recognize_google(pc, language='es-ES')
+                rec = self.listener.recognize_google(pc, language='es-CO')
                 if show_status:
                     print(f"Comando reconocido: {rec}")
                 return rec.lower()
