@@ -7,19 +7,15 @@ import pygame
 import speech_recognition as sr
 
 
-def _find_input_device():
-    nombres = sr.Microphone.list_microphone_names()
-    for i, nombre in enumerate(nombres):
-        n = nombre.lower()
-        if any(k in n for k in ("usb", "respeaker", "jounivo", "microphone", "mic")):
-            return i
-    return None  # None deja que SpeechRecognition use el microfono por defecto
-
-
 class VoiceTool:
     def __init__(self, device_index=None, timeout=10):
-        self.device_index = device_index if device_index is not None else _find_input_device()
-        print(f"Microfono seleccionado: index={self.device_index}")
+        # device_index=None deja que SpeechRecognition use el microfono por
+        # defecto del sistema. Con un unico microfono conectado, la
+        # deteccion por nombre resultaba en indices inconsistentes en
+        # Raspberry Pi OS (la cuenta de dispositivos cambia entre el
+        # escaneo y la apertura real del stream).
+        self.device_index = device_index
+        print(f"Microfono seleccionado: index={self.device_index} (por defecto del sistema)")
         self.timeout = timeout
         self.listener = sr.Recognizer()
         self.listener.pause_threshold = 2.0
