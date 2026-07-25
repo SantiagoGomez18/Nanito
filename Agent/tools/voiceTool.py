@@ -190,14 +190,35 @@ class VoiceTool:
             args=(self.device_index, self.timeout, self.phrase_time_limit, self.language, queue),
             daemon=True
         )
+        try:
+            return self._ejecutar_escucha(proc, queue, show_status, show_errors)
+        finally:
+            # Sin esto quedaban "leaked semaphore objects" acumulandose.
+            queue.close()
+            try:
+                queue.join_thread()
+            except Exception:
+                pass
+
+    def _ejecutar_escucha(self, proc, queue, show_status, show_errors):
         proc.start()
         proc.join(timeout=self.timeout + 15)
 
         if proc.is_alive():
+            # terminate() manda SIGTERM, que un proceso trabado dentro de una
+            # lectura ALSA no llega a atender: quedaba vivo reteniendo el
+            # microfono y rompia la corrida siguiente ("Subdevices: 0/1").
+            # Por eso escalamos a SIGKILL, que no se puede ignorar.
             proc.terminate()
-            proc.join()
+            proc.join(timeout=3)
+
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=3)
+
             if show_errors:
-                print("El microfono no respondio a tiempo, se omite este intento.")
+                estado = "no se pudo matar" if proc.is_alive() else "proceso terminado"
+                print(f"El microfono no respondio a tiempo ({estado}), se omite este intento.")
             return ""
 
         if proc.exitcode != 0:
