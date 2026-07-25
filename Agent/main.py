@@ -44,7 +44,7 @@ def worker(graph, voice, face_queue):
     while True:
         if not modo_activo:
             face_queue.put("sleep")
-            wake_input = voice.listen(show_status=False, show_errors=False)
+            wake_input = voice.listen(show_status=True, show_errors=True)
 
             if not wake_input or palabra_despierta not in wake_input.lower():
                 continue
