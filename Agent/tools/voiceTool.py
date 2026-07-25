@@ -3,8 +3,11 @@ import multiprocessing
 import os
 import tempfile
 import time
-import edge_tts
-import pygame
+
+# edge_tts y pygame se importan de forma perezosa dentro de los metodos que
+# los usan. Con el metodo "spawn", el proceso hijo re-importa este modulo en
+# cada escucha; importarlos aca arriba le costaria 1-2s extra por ciclo en la
+# Raspberry Pi, y el hijo no los necesita.
 
 
 def _listen_worker(device_index, timeout, phrase_time_limit, language, queue):
@@ -50,16 +53,22 @@ class VoiceTool:
         self.voice_name = "es-MX-JorgeNeural"
         self.voice_rate = "+0%"
 
+        import pygame
+
         if not pygame.mixer.get_init():
             pygame.mixer.init()
 
     async def texto_a_audio(self, text, output_path):
+        import edge_tts
+
         communicate = edge_tts.Communicate(text=text, voice=self.voice_name, rate=self.voice_rate)
         await communicate.save(output_path)
 
     def talk(self, text):
         if not text:
             return
+
+        import pygame
 
         temp_path = None
         try:
@@ -91,8 +100,14 @@ class VoiceTool:
         if show_status:
             print("Escuchando...")
 
-        queue = multiprocessing.Queue()
-        proc = multiprocessing.Process(
+        # "spawn" en vez del "fork" por defecto de Linux: fork copia la
+        # memoria del padre pero solo el hilo que llama. Como listen() se
+        # invoca desde un hilo mientras pygame/ALSA tienen locks tomados en
+        # otro, el hijo puede nacer bloqueado con un lock que nadie va a
+        # liberar. spawn arranca un interprete limpio, sin locks heredados.
+        ctx = multiprocessing.get_context("spawn")
+        queue = ctx.Queue()
+        proc = ctx.Process(
             target=_listen_worker,
             args=(self.device_index, self.timeout, self.phrase_time_limit, self.language, queue),
             daemon=True
