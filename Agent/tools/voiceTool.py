@@ -1,6 +1,7 @@
 import asyncio
 import os
 import tempfile
+import threading
 import time
 import edge_tts
 import pygame
@@ -63,12 +64,12 @@ class VoiceTool:
                 except OSError:
                     pass
 
-    def listen(self, show_status=True, show_errors=True):
+    def _listen_blocking(self, show_status, show_errors, result_holder):
         try:
             with sr.Microphone(device_index=self.device_index) as source:
-                if show_status:                    
+                if show_status:
                     print("Escuchando...")
-                    
+
                 self.listener.adjust_for_ambient_noise(source, duration=1)
                 pc = self.listener.listen(
                     source,
@@ -78,7 +79,7 @@ class VoiceTool:
                 rec = self.listener.recognize_google(pc, language='es-CO')
                 if show_status:
                     print(f"Comando reconocido: {rec}")
-                return rec.lower()
+                result_holder["text"] = rec.lower()
         except sr.WaitTimeoutError:
             if show_errors:
                 print(f"No se detecto voz en {self.timeout} segundos.")
@@ -91,4 +92,25 @@ class VoiceTool:
         except Exception as e:
             if show_errors:
                 print(f"Error al reconocer el comando: {e}")
-        return ""
+
+    def listen(self, show_status=True, show_errors=True):
+        # Timeout duro a nivel de hilo: si la captura de audio se cuelga
+        # (driver ALSA, mic desconectado, etc.), el propio timeout interno
+        # de speech_recognition no puede salvarnos porque el bloqueo ocurre
+        # en una lectura de bajo nivel. Este wrapper garantiza que el loop
+        # principal nunca se congele mas del limite indicado.
+        result_holder = {"text": ""}
+        hilo = threading.Thread(
+            target=self._listen_blocking,
+            args=(show_status, show_errors, result_holder),
+            daemon=True
+        )
+        hilo.start()
+        hilo.join(timeout=self.timeout + 15)
+
+        if hilo.is_alive():
+            if show_errors:
+                print("El microfono no respondio a tiempo, se omite este intento.")
+            return ""
+
+        return result_holder["text"]
