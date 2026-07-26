@@ -1,6 +1,13 @@
+import os
 import time
 import queue
 import threading
+
+# Debe ir ANTES de importar pygame. Con "spawn", el proceso hijo re-importa
+# este modulo en cada escucha, asi que sin esto el banner de pygame se
+# repetiria en cada ciclo.
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "hide")
+
 import pygame
 from langchain_core.messages import HumanMessage
 from agent import build_agent

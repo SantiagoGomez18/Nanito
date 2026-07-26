@@ -86,10 +86,27 @@ def _capturar_audio(sr, listener, indice, timeout, phrase_time_limit):
     raise ultimo_error if ultimo_error else RuntimeError("No se pudo abrir el microfono.")
 
 
+def _silenciar_stderr():
+    # ALSA, JACK y PortAudio escriben sus avisos directo al descriptor 2
+    # desde codigo C, asi que un try/except de Python no los intercepta:
+    # hay que redirigir el descriptor. Perder stderr aca no nos deja ciegos
+    # porque los errores reales del worker viajan por la Queue, no por stderr.
+    # Con NANITO_DEBUG=1 se conserva la salida para diagnosticar.
+    if os.environ.get("NANITO_DEBUG") == "1":
+        return
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, 2)
+        os.close(devnull)
+    except Exception:
+        pass
+
+
 def _listen_worker(device_index, timeout, phrase_time_limit, language, queue):
     # Corre en un PROCESO separado a proposito: si PortAudio/ALSA hace
     # segmentation fault al abrir el microfono, solo muere este proceso
     # hijo. El proceso principal (main.py) nunca se entera y sigue vivo.
+    _silenciar_stderr()
     import speech_recognition as sr
 
     try:
