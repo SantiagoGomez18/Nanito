@@ -21,6 +21,7 @@ class SpotifyTool:
         self.flag = 0
         self.sp = None
         self.cola = []  # cola interna gestionada: lista de tracks (dicts de Spotify)
+        self._market = None  # pais del usuario, se consulta una sola vez
         self.scope = "user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative user-library-read"
 
     def normalizar_texto(self, text):
@@ -38,6 +39,23 @@ class SpotifyTool:
 
         return same_song
 
+    def _mercado(self):
+        # Sin "market", la busqueda devuelve pistas del catalogo global que
+        # pueden NO ser reproducibles en el pais del usuario. Mandar esas URIs
+        # a start_playback hace que Spotify corte la reproduccion y vacie la
+        # cola. Se consulta una sola vez y se cachea.
+        if self._market is None:
+            try:
+                self._market = self.sp.current_user().get("country") or "US"
+            except Exception:
+                self._market = "US"
+        return self._market
+
+    def _reproducibles(self, tracks):
+        # Con "market", Spotify agrega is_playable. Descartamos las no
+        # reproducibles; si no viene el campo, asumimos que si lo es.
+        return [t for t in tracks if t and t.get("is_playable", True)]
+
     def buscar_cancion(self, song_name, artist_name=""):
         queries = []
 
@@ -48,8 +66,8 @@ class SpotifyTool:
         queries.append(song_name)
 
         for query in queries:
-            result = self.sp.search(q=query, type="track", limit=5)
-            tracks = result.get("tracks", {}).get("items", [])
+            result = self.sp.search(q=query, type="track", limit=5, market=self._mercado())
+            tracks = self._reproducibles(result.get("tracks", {}).get("items", []))
             if not tracks:
                 continue
 
@@ -119,7 +137,12 @@ class SpotifyTool:
 
         print(f"Reproduciendo en: {device_name}")
         candidatos = self._buscar_candidatos(found_artist, track["id"])
-        self._reconstruir_cola(track, candidatos, device_id)
+        sono = self._reconstruir_cola(track, candidatos, device_id)
+
+        if not sono:
+            return (f'Encontre "{track_name}" de {found_artist} pero Spotify no la '
+                    f'reprodujo en {device_name}. Revisa que Spotify este abierto '
+                    f'y activo en ese dispositivo.')
 
         return f"Reproduciendo {track_name} de {found_artist} en {device_name}"
 
@@ -211,8 +234,36 @@ class SpotifyTool:
         # nunca add_to_queue. Asi "agregar" puede insertar al frente despues.
         # Con shuffle apagado, la cancion pedida suena primero (uris[0]).
         uris = [track_actual["uri"]] + [t["uri"] for t in self.cola]
-        self.sp.start_playback(device_id=device_id, uris=uris)
+        try:
+            self.sp.start_playback(device_id=device_id, uris=uris)
+        except Exception as e:
+            print(f"start_playback fallo: {e}")
+            return False
+
         print(f"Cola: {len(self.cola)} canciones (max {MAX_COLA}).")
+        return self._verificar_reproduccion(track_actual["id"])
+
+    def _verificar_reproduccion(self, track_id_esperado):
+        # start_playback devuelve 204 aunque despues no suene nada (por
+        # ejemplo si el dispositivo no despierta). Confirmamos contra el
+        # estado real para no reportar un exito que no ocurrio.
+        import time
+
+        for intento in range(3):
+            time.sleep(1)
+            try:
+                estado = self.sp.current_playback()
+            except Exception as e:
+                print(f"No se pudo verificar la reproduccion: {e}")
+                return False
+
+            if estado and estado.get("is_playing"):
+                item = estado.get("item") or {}
+                if item.get("id") == track_id_esperado:
+                    return True
+
+        print("Spotify acepto la orden pero la reproduccion no arranco.")
+        return False
 
     def _buscar_candidatos(self, artist_name, track_id):
         # La app tiene cap de limit bajo: usamos limit=5 y paginamos con offset.
@@ -221,9 +272,10 @@ class SpotifyTool:
         for offset in range(0, 45, 5):
             try:
                 resultado = self.sp.search(
-                    q=f'artist:"{artist_name}"', type="track", limit=5, offset=offset
+                    q=f'artist:"{artist_name}"', type="track", limit=5,
+                    offset=offset, market=self._mercado()
                 )
-                items = resultado.get("tracks", {}).get("items", [])
+                items = self._reproducibles(resultado.get("tracks", {}).get("items", []))
             except Exception as e:
                 print(f"Fallo busqueda (offset {offset}): {e}")
                 break
