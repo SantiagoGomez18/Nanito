@@ -3,6 +3,7 @@ import spotipy
 import os
 import random
 import re
+import time
 import unicodedata
 from dotenv import load_dotenv
 
@@ -193,6 +194,7 @@ class SpotifyTool:
         except Exception as e:
             print(f"No se pudo apagar el modo aleatorio: {e}")
 
+        self._activar_dispositivo(device_id)
         try:
             if current_uri:
                 uris = [current_uri] + [t["uri"] for t in self.cola]
@@ -234,6 +236,8 @@ class SpotifyTool:
         # nunca add_to_queue. Asi "agregar" puede insertar al frente despues.
         # Con shuffle apagado, la cancion pedida suena primero (uris[0]).
         uris = [track_actual["uri"]] + [t["uri"] for t in self.cola]
+
+        self._activar_dispositivo(device_id)
         try:
             self.sp.start_playback(device_id=device_id, uris=uris)
         except Exception as e:
@@ -241,14 +245,45 @@ class SpotifyTool:
             return False
 
         print(f"Cola: {len(self.cola)} canciones (max {MAX_COLA}).")
+
+        if self._verificar_reproduccion(track_actual["id"]):
+            return True
+
+        # Segundo intento: forzar el traspaso del dispositivo y reproducir
+        # de nuevo. Cubre el caso del cliente que tarda en despertar.
+        print("Reintentando tras forzar el traspaso del dispositivo...")
+        try:
+            self.sp.transfer_playback(device_id=device_id, force_play=True)
+            time.sleep(1.5)
+            self.sp.start_playback(device_id=device_id, uris=uris)
+        except Exception as e:
+            print(f"Reintento fallo: {e}")
+            return False
+
         return self._verificar_reproduccion(track_actual["id"])
+
+    def _activar_dispositivo(self, device_id):
+        # Un dispositivo puede estar listado pero no ser el "activo" de
+        # Spotify Connect. En ese caso start_playback devuelve 204 y no
+        # suena nada. transfer_playback lo despierta.
+        try:
+            estado = self.sp.current_playback()
+            if estado and (estado.get("device") or {}).get("id") == device_id:
+                return  # ya es el dispositivo activo
+        except Exception:
+            pass
+
+        try:
+            self.sp.transfer_playback(device_id=device_id, force_play=False)
+            time.sleep(1.5)
+            print("Dispositivo activado via Spotify Connect.")
+        except Exception as e:
+            print(f"No se pudo activar el dispositivo: {e}")
 
     def _verificar_reproduccion(self, track_id_esperado):
         # start_playback devuelve 204 aunque despues no suene nada (por
         # ejemplo si el dispositivo no despierta). Confirmamos contra el
         # estado real para no reportar un exito que no ocurrio.
-        import time
-
         for intento in range(3):
             time.sleep(1)
             try:
@@ -333,6 +368,7 @@ class SpotifyTool:
         device_name = selected_device["name"]
 
         self.cola = []  # la cola gestionada se descarta al poner me gusta
+        self._activar_dispositivo(device_id)
         self.sp.start_playback(device_id=device_id, uris=uris)
         modo = " en modo aleatorio" if aleatorio else ""
         return f"Reproduciendo tus canciones que te gustan{modo} en {device_name}"
@@ -360,6 +396,7 @@ class SpotifyTool:
             print(f"No se pudo cambiar el modo aleatorio: {e}")
 
         self.cola = []  # la cola gestionada se descarta al poner una playlist
+        self._activar_dispositivo(device_id)
         self.sp.start_playback(device_id=device_id, context_uri=playlist["uri"])
         modo = " en modo aleatorio" if aleatorio else ""
         return f"Reproduciendo la playlist {playlist['name']}{modo} en {device_name}"

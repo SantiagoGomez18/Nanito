@@ -61,6 +61,13 @@ def _tasa_nativa(indice):
         pa.terminate()
 
 
+def _conf(nombre, defecto):
+    try:
+        return float(os.environ.get(nombre, defecto))
+    except (TypeError, ValueError):
+        return defecto
+
+
 def _capturar_audio(sr, listener, indice, timeout, phrase_time_limit):
     # SpeechRecognition abre a 16000 Hz por defecto. Micros USB baratos
     # (como el JV610) a veces rechazan esa tasa con "Unable to install hw
@@ -70,13 +77,21 @@ def _capturar_audio(sr, listener, indice, timeout, phrase_time_limit):
     if nativa and nativa != 16000:
         tasas.append(nativa)
 
+    # Duracion del muestreo de ruido ambiente. Con el ventilador de la Pi
+    # cerca del microfono, este ajuste sube el umbral y termina ignorando
+    # la voz. NANITO_AJUSTE_RUIDO=0 lo desactiva por completo.
+    ajuste = _conf("NANITO_AJUSTE_RUIDO", 1.0)
+
     ultimo_error = None
     for tasa in tasas:
         try:
             mic = sr.Microphone(device_index=indice) if tasa is None \
                 else sr.Microphone(device_index=indice, sample_rate=tasa)
             with mic as source:
-                listener.adjust_for_ambient_noise(source, duration=1)
+                if ajuste > 0:
+                    listener.adjust_for_ambient_noise(source, duration=ajuste)
+                if os.environ.get("NANITO_MIC_INFO") == "1":
+                    print(f"[mic] umbral de energia: {listener.energy_threshold:.0f}")
                 return listener.listen(source, timeout=timeout, phrase_time_limit=phrase_time_limit)
         except sr.WaitTimeoutError:
             raise
@@ -90,7 +105,7 @@ def _silenciar_stderr():
     # ALSA, JACK y PortAudio escriben sus avisos directo al descriptor 2
     # desde codigo C, asi que un try/except de Python no los intercepta:
     # hay que redirigir el descriptor. Perder stderr aca no nos deja ciegos
-    # porque los errores reales del worker viajan por la Queue, no por stderr.
+    # porque los errores reales del worker viajan por el Pipe, no por stderr.
     # Con NANITO_DEBUG=1 se conserva la salida para diagnosticar.
     if os.environ.get("NANITO_DEBUG") == "1":
         return
@@ -102,7 +117,19 @@ def _silenciar_stderr():
         pass
 
 
-def _listen_worker(device_index, timeout, phrase_time_limit, language, queue):
+def _responder(conn, estado, dato):
+    try:
+        conn.send((estado, dato))
+    except Exception:
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _listen_worker(device_index, timeout, phrase_time_limit, language, conn):
     # Corre en un PROCESO separado a proposito: si PortAudio/ALSA hace
     # segmentation fault al abrir el microfono, solo muere este proceso
     # hijo. El proceso principal (main.py) nunca se entera y sigue vivo.
@@ -112,26 +139,38 @@ def _listen_worker(device_index, timeout, phrase_time_limit, language, queue):
     try:
         indice = _resolve_input_device(device_index)
         if indice is None:
-            queue.put(("error", "No se encontro ningun dispositivo de entrada de audio."))
+            _responder(conn, "error", "No se encontro ningun dispositivo de entrada de audio.")
             return
 
         listener = sr.Recognizer()
-        listener.pause_threshold = 2.0
-        listener.non_speaking_duration = 1.0
-        listener.phrase_threshold = 0.2
-        listener.dynamic_energy_threshold = True
+        listener.pause_threshold = _conf("NANITO_PAUSA", 2.0)
+        listener.non_speaking_duration = min(1.0, listener.pause_threshold)
+        listener.phrase_threshold = _conf("NANITO_FRASE_MIN", 0.2)
+
+        # Si se fija NANITO_ENERGIA, se usa ese umbral y se desactiva el
+        # ajuste automatico: es la forma directa de hacer el mic mas
+        # sensible cuando el ruido de fondo enganaba al calculo dinamico.
+        energia = os.environ.get("NANITO_ENERGIA")
+        if energia:
+            try:
+                listener.energy_threshold = float(energia)
+                listener.dynamic_energy_threshold = False
+            except ValueError:
+                listener.dynamic_energy_threshold = True
+        else:
+            listener.dynamic_energy_threshold = True
 
         audio = _capturar_audio(sr, listener, indice, timeout, phrase_time_limit)
         rec = listener.recognize_google(audio, language=language)
-        queue.put(("ok", rec.lower()))
+        _responder(conn, "ok", rec.lower())
     except sr.WaitTimeoutError:
-        queue.put(("timeout", None))
+        _responder(conn, "timeout", None)
     except sr.UnknownValueError:
-        queue.put(("unknown", None))
+        _responder(conn, "unknown", None)
     except sr.RequestError as e:
-        queue.put(("request_error", str(e)))
+        _responder(conn, "request_error", str(e))
     except Exception as e:
-        queue.put(("error", str(e)))
+        _responder(conn, "error", str(e))
 
 
 class VoiceTool:
@@ -201,24 +240,33 @@ class VoiceTool:
         # otro, el hijo puede nacer bloqueado con un lock que nadie va a
         # liberar. spawn arranca un interprete limpio, sin locks heredados.
         ctx = multiprocessing.get_context("spawn")
-        queue = ctx.Queue()
+
+        # Pipe en vez de Queue: cada Queue reserva 3 semaforos del sistema y,
+        # como se creaba una por escucha, el resource_tracker avisaba de
+        # "leaked semaphore objects". Solo necesitamos devolver un valor.
+        recv_conn, send_conn = ctx.Pipe(duplex=False)
         proc = ctx.Process(
             target=_listen_worker,
-            args=(self.device_index, self.timeout, self.phrase_time_limit, self.language, queue),
+            args=(self.device_index, self.timeout, self.phrase_time_limit, self.language, send_conn),
             daemon=True
         )
         try:
-            return self._ejecutar_escucha(proc, queue, show_status, show_errors)
+            return self._ejecutar_escucha(proc, recv_conn, send_conn, show_status, show_errors)
         finally:
-            # Sin esto quedaban "leaked semaphore objects" acumulandose.
-            queue.close()
-            try:
-                queue.join_thread()
-            except Exception:
-                pass
+            for c in (recv_conn, send_conn):
+                try:
+                    c.close()
+                except Exception:
+                    pass
 
-    def _ejecutar_escucha(self, proc, queue, show_status, show_errors):
+    def _ejecutar_escucha(self, proc, recv_conn, send_conn, show_status, show_errors):
         proc.start()
+        # El padre cierra su copia del extremo de escritura: asi, si el hijo
+        # muere sin responder, el pipe queda cerrado y poll() no se cuelga.
+        try:
+            send_conn.close()
+        except Exception:
+            pass
         proc.join(timeout=self.timeout + 15)
 
         if proc.is_alive():
@@ -244,7 +292,9 @@ class VoiceTool:
             return ""
 
         try:
-            status, data = queue.get_nowait()
+            if not recv_conn.poll(0):
+                return ""
+            status, data = recv_conn.recv()
         except Exception:
             return ""
 
