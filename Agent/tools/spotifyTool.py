@@ -256,11 +256,28 @@ class SpotifyTool:
             self.sp.transfer_playback(device_id=device_id, force_play=True)
             time.sleep(1.5)
             self.sp.start_playback(device_id=device_id, uris=uris)
+            if self._verificar_reproduccion(track_actual["id"]):
+                return True
         except Exception as e:
             print(f"Reintento fallo: {e}")
+
+        # Tercer intento: solo la cancion pedida, sin cola. Si esto SI suena,
+        # el problema esta en alguna URI de la cola, no en el dispositivo ni
+        # en la cancion. Ademas garantiza que al usuario le suene lo que pidio.
+        print("Reintentando con la cancion sola, sin cola...")
+        try:
+            self.sp.start_playback(device_id=device_id, uris=[track_actual["uri"]])
+        except Exception as e:
+            print(f"Reproduccion sin cola fallo: {e}")
             return False
 
-        return self._verificar_reproduccion(track_actual["id"])
+        if self._verificar_reproduccion(track_actual["id"]):
+            print("FUNCIONO SIN COLA -> el problema esta en las URIs de la cola.")
+            self.cola = []  # descartamos la cola problematica
+            return True
+
+        print("Tampoco suena la cancion sola: el problema no es la cola.")
+        return False
 
     def _activar_dispositivo(self, device_id):
         # Un dispositivo puede estar listado pero no ser el "activo" de
@@ -284,6 +301,7 @@ class SpotifyTool:
         # start_playback devuelve 204 aunque despues no suene nada (por
         # ejemplo si el dispositivo no despierta). Confirmamos contra el
         # estado real para no reportar un exito que no ocurrio.
+        estado = None
         for intento in range(3):
             time.sleep(1)
             try:
@@ -297,7 +315,17 @@ class SpotifyTool:
                 if item.get("id") == track_id_esperado:
                     return True
 
-        print("Spotify acepto la orden pero la reproduccion no arranco.")
+        # Diagnostico: que esta haciendo Spotify realmente.
+        if not estado:
+            print("Verificacion: Spotify no reporta ninguna sesion activa.")
+        else:
+            item = estado.get("item") or {}
+            dev = estado.get("device") or {}
+            print("Verificacion: la reproduccion no arranco. Estado real ->")
+            print(f"   is_playing : {estado.get('is_playing')}")
+            print(f"   dispositivo: {dev.get('name')} (activo={dev.get('is_active')})")
+            print(f"   sonando    : {item.get('name')} [{item.get('id')}]")
+            print(f"   esperabamos: [{track_id_esperado}]")
         return False
 
     def _buscar_candidatos(self, artist_name, track_id):
