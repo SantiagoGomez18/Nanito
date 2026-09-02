@@ -140,26 +140,27 @@ class SpotifyTool:
         if not exact_match and not artist_name:
             return f'No encontre coincidencia exacta. La mas relevante fue "{track_name}" de {found_artist}.'
 
-        devices = self.sp.devices().get("devices", [])
-        if not devices:
-            print("No hay dispositivos activos de Spotify.")
-            return "No encontre dispositivos activos de Spotify. Abre Spotify en tu celular o computador y vuelve a intentarlo."
+        dispositivos = self._dispositivos_ordenados()
+        if not dispositivos:
+            print("No hay dispositivos de Spotify disponibles.")
+            return "No encontre dispositivos de Spotify. Abre Spotify en tu celular o computador y vuelve a intentarlo."
 
-        active_device = next((device for device in devices if device.get("is_active")), None)
-        selected_device = active_device if active_device else devices[0]
-        device_id = selected_device["id"]
-        device_name = selected_device["name"]
-
-        print(f"Reproduciendo en: {device_name}")
         candidatos = self._buscar_candidatos(found_artist, track["id"])
-        sono = self._reconstruir_cola(track, candidatos, device_id)
 
-        if not sono:
-            return (f'Encontre "{track_name}" de {found_artist} pero Spotify no la '
-                    f'reprodujo en {device_name}. Revisa que Spotify este abierto '
-                    f'y activo en ese dispositivo.')
+        # Se prueban en orden: un dispositivo puede estar listado pero
+        # offline y devolver 404, y en ese caso corresponde seguir con el
+        # siguiente en vez de darse por vencido.
+        for dispositivo in dispositivos:
+            nombre = dispositivo.get("name")
+            print(f"Intentando reproducir en: {nombre}")
+            if self._reconstruir_cola(track, candidatos, dispositivo["id"]):
+                return f"Reproduciendo {track_name} de {found_artist} en {nombre}"
+            print(f"No se pudo en {nombre}, probando el siguiente...")
 
-        return f"Reproduciendo {track_name} de {found_artist} en {device_name}"
+        nombres = ", ".join(d.get("name") or "?" for d in dispositivos)
+        return (f'Encontre "{track_name}" de {found_artist} pero no pude reproducirla '
+                f'en ningun dispositivo ({nombres}). Abre Spotify y dale play a '
+                f'cualquier cancion primero.')
 
     def agregar_cancion(self, song, artist=""):
         song_name = song.strip()
@@ -178,12 +179,10 @@ class SpotifyTool:
         if any(t["id"] == track["id"] for t in self.cola):
             return f"{track_name} ya esta en la cola."
 
-        devices = self.sp.devices().get("devices", [])
-        if not devices:
-            return "No encontre dispositivos activos de Spotify. Abre Spotify y vuelve a intentarlo."
+        selected_device = self._elegir_dispositivo()
+        if not selected_device:
+            return "No encontre dispositivos de Spotify. Abre Spotify y vuelve a intentarlo."
 
-        active_device = next((d for d in devices if d.get("is_active")), None)
-        selected_device = active_device if active_device else devices[0]
         device_id = selected_device["id"]
 
         # Leer la cancion y posicion actual para reanudarla casi sin corte.
@@ -293,6 +292,46 @@ class SpotifyTool:
         print("Tampoco suena la cancion sola: el problema no es la cola.")
         return False
 
+    def _dispositivos_ordenados(self):
+        # Devuelve los dispositivos utilizables en orden de preferencia.
+        # Se prueban uno por uno: un dispositivo listado puede estar offline
+        # y responder 404 (paso con el celular con Spotify cerrado).
+        try:
+            devices = self.sp.devices().get("devices", [])
+        except Exception as e:
+            print(f"No se pudieron listar los dispositivos: {e}")
+            return []
+
+        # Nunca reproducir en la propia Raspberry: la musica va en la PC o
+        # el celular. Configurable con SPOTIFY_EXCLUIR en el .env.
+        excluidos = (os.getenv("SPOTIFY_EXCLUIR")
+                     or "raspberry,raspotify,librespot,nanito").lower().split(",")
+        excluidos = [e.strip() for e in excluidos if e.strip()]
+
+        utiles = []
+        for d in devices:
+            nombre = (d.get("name") or "").lower()
+            if any(x in nombre for x in excluidos):
+                print(f"Dispositivo excluido: {d.get('name')}")
+                continue
+            utiles.append(d)
+
+        preferido = (os.getenv("SPOTIFY_DISPOSITIVO") or "").strip().lower()
+
+        def prioridad(d):
+            nombre = (d.get("name") or "").lower()
+            if d.get("is_active"):
+                return 0
+            if preferido and preferido in nombre:
+                return 1
+            return 2
+
+        return sorted(utiles, key=prioridad)
+
+    def _elegir_dispositivo(self):
+        candidatos = self._dispositivos_ordenados()
+        return candidatos[0] if candidatos else None
+
     def _activar_dispositivo(self, device_id):
         # Un dispositivo puede estar listado pero no ser el "activo" de
         # Spotify Connect. En ese caso start_playback devuelve 204 y no
@@ -400,12 +439,10 @@ class SpotifyTool:
         if aleatorio:
             random.shuffle(uris)
 
-        devices = self.sp.devices().get("devices", [])
-        if not devices:
-            return "No encontre dispositivos activos de Spotify. Abre Spotify y vuelve a intentarlo."
+        selected_device = self._elegir_dispositivo()
+        if not selected_device:
+            return "No encontre dispositivos de Spotify. Abre Spotify y vuelve a intentarlo."
 
-        active_device = next((d for d in devices if d.get("is_active")), None)
-        selected_device = active_device if active_device else devices[0]
         device_id = selected_device["id"]
         device_name = selected_device["name"]
 
@@ -423,12 +460,10 @@ class SpotifyTool:
         if not playlist:
             return f"No encontre una playlist llamada {nombre}."
 
-        devices = self.sp.devices().get("devices", [])
-        if not devices:
-            return "No encontre dispositivos activos de Spotify. Abre Spotify y vuelve a intentarlo."
+        selected_device = self._elegir_dispositivo()
+        if not selected_device:
+            return "No encontre dispositivos de Spotify. Abre Spotify y vuelve a intentarlo."
 
-        active_device = next((d for d in devices if d.get("is_active")), None)
-        selected_device = active_device if active_device else devices[0]
         device_id = selected_device["id"]
         device_name = selected_device["name"]
 
