@@ -21,11 +21,18 @@ def main():
     try:
         u = s.current_user()
         producto = u.get("product")
+        pais = u.get("country")
         print(f"   usuario : {u.get('display_name')} ({u.get('id')})")
-        print(f"   pais    : {u.get('country')}")
+        print(f"   pais    : {pais}")
         print(f"   producto: {producto}")
-        if producto != "premium":
-            print("   >>> SIN PREMIUM: la API no puede controlar la reproduccion.")
+
+        if producto is None or pais is None:
+            print("   >>> El token NO trae 'product'/'country'.")
+            print("       Falta el scope user-read-private.")
+            print("       Borra .spotify_cache y volve a autenticar.")
+            return 1
+        if producto == "free":
+            print("   >>> Cuenta gratuita: la API no puede controlar la reproduccion.")
             return 1
     except Exception as e:
         print(f"   ERROR: {e}")

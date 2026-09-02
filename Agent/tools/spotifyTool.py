@@ -23,7 +23,11 @@ class SpotifyTool:
         self.sp = None
         self.cola = []  # cola interna gestionada: lista de tracks (dicts de Spotify)
         self._market = None  # pais del usuario, se consulta una sola vez
-        self.scope = "user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative user-library-read"
+        # user-read-private es imprescindible: sin el, current_user() no
+        # devuelve "country" ni "product", y las busquedas terminan usando
+        # un mercado equivocado (URIs que la cuenta no puede reproducir).
+        self.scope = ("user-read-private user-modify-playback-state user-read-playback-state "
+                      "playlist-read-private playlist-read-collaborative user-library-read")
 
     def normalizar_texto(self, text):
         text = text.lower().strip()
@@ -47,10 +51,20 @@ class SpotifyTool:
         # cola. Se consulta una sola vez y se cachea.
         if self._market is None:
             try:
-                self._market = self.sp.current_user().get("country") or "US"
-            except Exception:
-                self._market = "US"
-        return self._market
+                pais = self.sp.current_user().get("country")
+            except Exception as e:
+                print(f"No se pudo leer el pais de la cuenta: {e}")
+                pais = None
+
+            if not pais:
+                # Mejor no mandar market que mandar uno equivocado: un
+                # mercado ajeno devuelve URIs que la cuenta no puede
+                # reproducir. spotipy omite el parametro si es None.
+                print("AVISO: la cuenta no expone 'country'. Falta el scope "
+                      "user-read-private o hay que reautenticar.")
+            self._market = pais or False  # False = ya consultado, sin dato
+
+        return self._market or None
 
     def _reproducibles(self, tracks):
         # Con "market", Spotify agrega is_playable. Descartamos las no
